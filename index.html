@@ -123,6 +123,9 @@
   .srow .mv { display: flex; gap: 2px; }
   .srow .mv button { padding: 4px 6px; }
   .pinrow { display: flex; align-items: center; gap: 8px; padding: 8px; font-size: 13px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 4px; }
+  .tgl { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.08);
+         border-radius: 6px; padding: 8px 12px; font-size: 13px; cursor: pointer; user-select: none; }
+  .tgl:hover { border-color: var(--yellow); }
   .scope { color: var(--grey); font-size: 12px; margin: -6px 0 10px; }
   .empty { color: var(--grey); padding: 40px; text-align: center; grid-column: 1/-1; }
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--yellow); color: #111;
@@ -180,6 +183,7 @@
       <summary id="sortLabel">Sort order</summary>
       <div class="ddmenu sortmenu" id="sortMenu"></div>
     </details>
+    <label class="tgl" title="Hide sprites that are not released yet"><input type="checkbox" id="showUnrel" checked> Show unreleased</label>
   </div>
   <!-- Extra compare filters, only visible in friend view -->
   <div class="controls" id="cmpControls" style="display:none">
@@ -258,19 +262,17 @@ const SORT_META = {
   name:    { label:'Name',    dirs:['A → Z', 'Z → A'] },
   status:  { label:'Status',  dirs:['Needed first', 'Owned first'] },
   rarity:  { label:'Rarity',  dirs:['Common first', 'Rarest first'] },
-  unreleased: { label:'Unreleased', dirs:['Released first', 'Unreleased first'] },
 };
 const SORT_DEFAULT = () => ({
   keys: [ { k:'name', on:true, dir:1 }, { k:'variant', on:true, dir:1 },
-          { k:'status', on:true, dir:1 }, { k:'rarity', on:true, dir:-1 },
-          { k:'unreleased', on:true, dir:1 } ],
+          { k:'status', on:true, dir:1 }, { k:'rarity', on:true, dir:-1 } ],
   pinWish: true });
 let sortCfg = SORT_DEFAULT();
 let friend = null;          // currently-viewed shared collection {name, owned:Set, wish:Set} or null
 // Current season = newest season id present in the data. The counters always track this one;
 // the Seasons dropdown only controls which cards are listed (default: current season only).
 const CURRENT = Math.max(...SPRITES.map(s => s.season));
-let ui = { view:'all', rarity:'', variant:'', seasons:new Set([CURRENT]), sort:'default', cmp:'all', q:'' };
+let ui = { view:'all', rarity:'', variant:'', seasons:new Set([CURRENT]), showUnreleased:true, cmp:'all', q:'' };
 
 const LS_PREV = LS_KEY + '.prev';   // rolling copy of the previous save (safety net)
 let recoveredFromPrev = false;
@@ -287,12 +289,17 @@ function adopt(d) {
   // Seasons: ignore ids that no longer exist in the data, fall back to current season only
   const ss = (d.seasons || []).filter(x => SEASON[x]);
   ui.seasons = ss.length ? new Set(ss.map(Number)) : new Set([CURRENT]);
-  // Sort order: validate so a stale/corrupt value (or an older layout with fewer rows) resets to default
-  const sc = d.sort, want = SORT_DEFAULT().keys.length;
-  sortCfg = (sc && Array.isArray(sc.keys) && sc.keys.length === want && sc.keys.every(x => SORT_META[x.k])
-             && new Set(sc.keys.map(x => x.k)).size === want)
-    ? { keys: sc.keys.map(x => ({ k:x.k, on:!!x.on, dir:x.dir === -1 ? -1 : 1 })), pinWish: sc.pinWish !== false }
-    : SORT_DEFAULT();
+  // Sort order: keep the saved order of rows that still exist, drop retired ones (e.g. the old
+  // "unreleased" row), and append any rows the saved config doesn't have yet.
+  const sc = d.sort, seen = new Set(), keys = [];
+  if (sc && Array.isArray(sc.keys)) {
+    for (const x of sc.keys) {
+      if (x && SORT_META[x.k] && !seen.has(x.k)) { seen.add(x.k); keys.push({ k:x.k, on:!!x.on, dir:x.dir === -1 ? -1 : 1 }); }
+    }
+  }
+  for (const x of SORT_DEFAULT().keys) if (!seen.has(x.k)) keys.push(sc ? { ...x } : x);
+  sortCfg = { keys, pinWish: !sc || sc.pinWish !== false };
+  ui.showUnreleased = d.showUnreleased !== false;     // default: shown
 }
 function load() {
   let d = null;
@@ -306,7 +313,7 @@ function save() {
   try {
     const next = JSON.stringify({
       name: state.name, owned: [...state.owned], wish: [...state.wish], mast: [...state.mast],
-      seasons: [...ui.seasons], sort: sortCfg, lastBackup: state.lastBackup || '', friends: state.friends });
+      seasons: [...ui.seasons], sort: sortCfg, showUnreleased: ui.showUnreleased, lastBackup: state.lastBackup || '', friends: state.friends });
     const cur = localStorage.getItem(LS_KEY);
     // Keep one step of history, but never let an unreadable value overwrite the good safety copy
     if (cur && cur !== next) { try { JSON.parse(cur); localStorage.setItem(LS_PREV, cur); } catch (e) { /* skip corrupt value */ } }
@@ -340,7 +347,7 @@ const decAll = str => new Set(str ? str.split('.').map(x => parseInt(x, 36)).fil
 function snapshot() {
   return { app:BACKUP_APP, version:1, saved:new Date().toISOString(), name:state.name,
     owned:[...state.owned], wish:[...state.wish], mast:[...state.mast],
-    seasons:[...ui.seasons], sort:sortCfg, friends:state.friends };
+    seasons:[...ui.seasons], sort:sortCfg, showUnreleased:ui.showUnreleased, friends:state.friends };
 }
 function markBackedUp() { state.lastBackup = new Date().toISOString(); save(); drawBackupInfo(); }
 function drawBackupInfo() {
@@ -369,9 +376,9 @@ function restoreSnapshot(d) {
   const n = (d.owned || []).length;
   if (!confirm('Replace this device\'s collection with the backup (' + n + ' owned)? This cannot be undone.')) return false;
   const keepSeasons = [...ui.seasons], keepSort = sortCfg;
-  adopt({ ...d, seasons: d.seasons || keepSeasons, sort: d.sort || keepSort });
+  adopt({ ...d, seasons: d.seasons || keepSeasons, sort: d.sort || keepSort, showUnreleased: d.showUnreleased ?? ui.showUnreleased });
   state.lastBackup = new Date().toISOString();
-  save(); $('myName').value = state.name; drawSeasonMenu(); drawSortMenu(); drawBackupInfo(); render();
+  save(); $('myName').value = state.name; $('showUnrel').checked = ui.showUnreleased; drawSeasonMenu(); drawSortMenu(); drawBackupInfo(); render();
   toast('Backup restored');
   return true;
 }
@@ -412,6 +419,7 @@ function visible() {
     if (ui.rarity && s.rar !== ui.rarity) return false;
     if (ui.variant && s.vr !== ui.variant) return false;
     if (!ui.seasons.has(s.season)) return false;          // hidden until enabled in the Seasons dropdown
+    if (!ui.showUnreleased && s.unreleased) return false; // "Show unreleased" toggle
     const own = state.owned.has(s.id), wish = state.wish.has(s.id);
     if (ui.view === 'owned' && !own) return false;
     if (ui.view === 'need' && own) return false;
@@ -434,7 +442,6 @@ const CMP = {
   name:    (a, b) => a.base.localeCompare(b.base),             // base name, so variant groups line up
   status:  (a, b) => (state.owned.has(a.id) ? 1 : 0) - (state.owned.has(b.id) ? 1 : 0),   // needed (0) first
   rarity:  (a, b) => RANK[a.brar] - RANK[b.brar],              // common -> rare
-  unreleased: (a, b) => (a.unreleased ? 1 : 0) - (b.unreleased ? 1 : 0),   // released (0) first
 };
 // Walk the enabled keys in order; the first key that differs decides. Wishlist pin sits above all of them.
 function compareSprites(a, b) {
@@ -548,6 +555,9 @@ function initControls() {
   $('fRarity').onchange = e => { ui.rarity = e.target.value; render(); };
   $('fVariant').onchange = e => { ui.variant = e.target.value; render(); };
   drawSortMenu();
+  // "Show unreleased" toggle: off removes unreleased sprites from the list until turned back on
+  $('showUnrel').checked = ui.showUnreleased;
+  $('showUnrel').onchange = e => { ui.showUnreleased = e.target.checked; save(); render(); };
   $('search').oninput = e => { ui.q = e.target.value.trim().toLowerCase(); render(); };
   $('myName').value = state.name;
   $('myName').oninput = e => { state.name = e.target.value; save(); };
