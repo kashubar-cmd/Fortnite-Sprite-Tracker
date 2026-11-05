@@ -141,6 +141,8 @@
   <div class="spacer"></div>
   <small id="updated" style="color:var(--grey)"></small>
   <input type="text" id="myName" placeholder="Your name" maxlength="24" style="width:140px">
+  <small id="bkNote" style="color:var(--grey)"></small>
+  <button id="btnBackup">💾 Backup</button>
   <button id="btnFriends">👥 Friends</button>
   <button id="btnShare" class="primary">🔗 Copy share link</button>
 </header>
@@ -195,6 +197,21 @@
   <div style="display:flex;gap:8px"><button class="primary" id="friendOpen">Open &amp; compare</button><button id="friendsClose">Close</button></div>
   <div id="friendList" style="margin-top:14px"></div>
 </dialog>
+<dialog id="dlgBackup">
+  <h3 style="margin-top:0">Backup &amp; restore</h3>
+  <p style="color:var(--grey-2);font-size:13px">Your collection is stored only in this browser. Clearing site data, private browsing, or switching browser or device starts you from zero, so keep a backup somewhere safe (cloud drive, notes, messages to yourself).</p>
+  <div id="backupInfo" style="color:var(--yellow);font-size:13px;margin-bottom:10px"></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="primary" id="bkDownload">⬇ Download backup file</button>
+    <button id="bkLink">🔗 Copy backup link</button>
+  </div>
+  <hr style="border:0;border-top:1px solid rgba(255,255,255,.1);margin:16px 0">
+  <b style="font-size:13px">Restore</b>
+  <p style="color:var(--grey);font-size:12px;margin:4px 0">Replaces what is on this device with the backup.</p>
+  <input type="file" id="bkFile" accept=".json,application/json" style="margin-bottom:6px">
+  <input type="text" id="bkPaste" placeholder="…or paste a backup link here">
+  <div style="display:flex;gap:8px"><button id="bkRestore">Restore from link</button><button id="bkClose">Close</button></div>
+</dialog>
 <div class="toast" id="toast"></div>
 
 <!-- Sprite list + image file names. Regenerated automatically by scripts/update.mjs -->
@@ -241,10 +258,12 @@ const SORT_META = {
   name:    { label:'Name',    dirs:['A → Z', 'Z → A'] },
   status:  { label:'Status',  dirs:['Needed first', 'Owned first'] },
   rarity:  { label:'Rarity',  dirs:['Common first', 'Rarest first'] },
+  unreleased: { label:'Unreleased', dirs:['Released first', 'Unreleased first'] },
 };
 const SORT_DEFAULT = () => ({
-  keys: [ { k:'variant', on:true, dir:1 }, { k:'name', on:true, dir:1 },
-          { k:'status', on:true, dir:1 }, { k:'rarity', on:false, dir:-1 } ],
+  keys: [ { k:'name', on:true, dir:1 }, { k:'variant', on:true, dir:1 },
+          { k:'status', on:true, dir:1 }, { k:'rarity', on:true, dir:-1 },
+          { k:'unreleased', on:true, dir:1 } ],
   pinWish: true });
 let sortCfg = SORT_DEFAULT();
 let friend = null;          // currently-viewed shared collection {name, owned:Set, wish:Set} or null
@@ -253,30 +272,45 @@ let friend = null;          // currently-viewed shared collection {name, owned:S
 const CURRENT = Math.max(...SPRITES.map(s => s.season));
 let ui = { view:'all', rarity:'', variant:'', seasons:new Set([CURRENT]), sort:'default', cmp:'all', q:'' };
 
+const LS_PREV = LS_KEY + '.prev';   // rolling copy of the previous save (safety net)
+let recoveredFromPrev = false;
+
+// Copy a plain saved/backup object into live state. Unknown sprite ids are kept on purpose so a
+// later list update (or an older backup) never drops collection data.
+function adopt(d) {
+  state.name = typeof d.name === 'string' ? d.name : '';
+  state.owned = new Set(d.owned || []);
+  state.wish = new Set(d.wish || []);
+  state.mast = new Set(d.mast || []);
+  state.friends = d.friends || {};
+  state.lastBackup = d.lastBackup || '';
+  // Seasons: ignore ids that no longer exist in the data, fall back to current season only
+  const ss = (d.seasons || []).filter(x => SEASON[x]);
+  ui.seasons = ss.length ? new Set(ss.map(Number)) : new Set([CURRENT]);
+  // Sort order: validate so a stale/corrupt value (or an older layout with fewer rows) resets to default
+  const sc = d.sort, want = SORT_DEFAULT().keys.length;
+  sortCfg = (sc && Array.isArray(sc.keys) && sc.keys.length === want && sc.keys.every(x => SORT_META[x.k])
+             && new Set(sc.keys.map(x => x.k)).size === want)
+    ? { keys: sc.keys.map(x => ({ k:x.k, on:!!x.on, dir:x.dir === -1 ? -1 : 1 })), pinWish: sc.pinWish !== false }
+    : SORT_DEFAULT();
+}
 function load() {
-  try {
-    const d = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-    state.name = d.name || '';
-    state.owned = new Set(d.owned || []);
-    state.wish = new Set(d.wish || []);
-    state.mast = new Set(d.mast || []);
-    // Restore sort order; validate so a stale/corrupt saved value can't break the page
-    const sc = d.sort;
-    if (sc && Array.isArray(sc.keys) && sc.keys.length === 4 && sc.keys.every(x => SORT_META[x.k])
-        && new Set(sc.keys.map(x => x.k)).size === 4) {
-      sortCfg = { keys: sc.keys.map(x => ({ k:x.k, on:!!x.on, dir:x.dir === -1 ? -1 : 1 })), pinWish: sc.pinWish !== false };
-    }
-    // Restore which seasons were enabled; ignore ids that no longer exist in the data
-    const ss = (d.seasons || []).filter(x => SEASON[x]);
-    if (ss.length) ui.seasons = new Set(ss.map(Number));
-    state.friends = d.friends || {};
-  } catch (e) { /* corrupt or blocked storage: start fresh */ }
+  let d = null;
+  try { const raw = localStorage.getItem(LS_KEY); d = raw ? JSON.parse(raw) : null; } catch (e) { d = null; }
+  if (!d) {   // main copy missing or unreadable: fall back to the previous-save copy if there is one
+    try { const prev = localStorage.getItem(LS_PREV); if (prev) { d = JSON.parse(prev); recoveredFromPrev = true; } } catch (e) { d = null; }
+  }
+  if (d) { try { adopt(d); } catch (e) { /* bad data: keep defaults */ } }
 }
 function save() {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify({
+    const next = JSON.stringify({
       name: state.name, owned: [...state.owned], wish: [...state.wish], mast: [...state.mast],
-      seasons: [...ui.seasons], sort: sortCfg, friends: state.friends }));
+      seasons: [...ui.seasons], sort: sortCfg, lastBackup: state.lastBackup || '', friends: state.friends });
+    const cur = localStorage.getItem(LS_KEY);
+    // Keep one step of history, but never let an unreadable value overwrite the good safety copy
+    if (cur && cur !== next) { try { JSON.parse(cur); localStorage.setItem(LS_PREV, cur); } catch (e) { /* skip corrupt value */ } }
+    localStorage.setItem(LS_KEY, next);
   } catch (e) { toast('Could not save (storage blocked)'); }
 }
 
@@ -296,6 +330,79 @@ function parseLink(link) {
   const p = new URLSearchParams(h);
   if (!p.has('o') && !p.has('w')) return null;
   return { name: p.get('n') || 'Friend', owned: dec(p.get('o')), wish: dec(p.get('w')) };
+}
+
+/* ---------- Backup / restore ----------
+   File format: JSON {app, version, saved, name, owned[], wish[], mast[], seasons[], sort, friends}.
+   Link format: #bk=1&n=<name>&o=<base36 ids>&w=..&m=..&f=<friends json> (same id encoding as share links). */
+const BACKUP_APP = 'sprite-tracker';
+const decAll = str => new Set(str ? str.split('.').map(x => parseInt(x, 36)).filter(Number.isFinite) : []);   // keeps unknown ids
+function snapshot() {
+  return { app:BACKUP_APP, version:1, saved:new Date().toISOString(), name:state.name,
+    owned:[...state.owned], wish:[...state.wish], mast:[...state.mast],
+    seasons:[...ui.seasons], sort:sortCfg, friends:state.friends };
+}
+function markBackedUp() { state.lastBackup = new Date().toISOString(); save(); drawBackupInfo(); }
+function drawBackupInfo() {
+  const lb = state.lastBackup ? new Date(state.lastBackup).toLocaleString() : '';
+  const has = state.owned.size || state.wish.size || state.mast.size;
+  $('backupInfo').textContent = lb ? 'Last backup: ' + lb : (has ? '⚠ No backup made yet.' : 'No backup yet.');
+  const note = $('bkNote');
+  note.textContent = lb ? '' : (has ? '⚠ not backed up' : '');
+  note.style.color = 'var(--yellow)';
+}
+function backupLink() {
+  const p = new URLSearchParams({ bk:'1', n:state.name || '', o:enc(state.owned), w:enc(state.wish), m:enc(state.mast),
+                                  f:JSON.stringify(state.friends) });
+  return location.href.split('#')[0] + '#' + p.toString();
+}
+function snapshotFromLink(link) {
+  const p = new URLSearchParams(link.includes('#') ? link.split('#')[1] : link);
+  if (!p.has('bk')) return null;
+  let friends = {}; try { friends = JSON.parse(p.get('f') || '{}'); } catch (e) {}
+  return { app:BACKUP_APP, name:p.get('n') || '', owned:[...decAll(p.get('o'))], wish:[...decAll(p.get('w'))],
+           mast:[...decAll(p.get('m'))], friends };
+}
+// Replace local data with a backup after the user confirms. Keeps current seasons/sort when the backup lacks them.
+function restoreSnapshot(d) {
+  if (!d || d.app !== BACKUP_APP) { toast('That is not a Sprite Tracker backup'); return false; }
+  const n = (d.owned || []).length;
+  if (!confirm('Replace this device\'s collection with the backup (' + n + ' owned)? This cannot be undone.')) return false;
+  const keepSeasons = [...ui.seasons], keepSort = sortCfg;
+  adopt({ ...d, seasons: d.seasons || keepSeasons, sort: d.sort || keepSort });
+  state.lastBackup = new Date().toISOString();
+  save(); $('myName').value = state.name; drawSeasonMenu(); drawSortMenu(); drawBackupInfo(); render();
+  toast('Backup restored');
+  return true;
+}
+function initBackup() {
+  $('btnBackup').onclick = () => { drawBackupInfo(); $('dlgBackup').showModal(); };
+  $('bkClose').onclick = () => $('dlgBackup').close();
+  $('bkDownload').onclick = () => {
+    const blob = new Blob([JSON.stringify(snapshot(), null, 1)], { type:'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'sprite-tracker-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    markBackedUp();
+  };
+  $('bkLink').onclick = async () => {
+    const link = backupLink();
+    try { await navigator.clipboard.writeText(link); toast('Backup link copied. Save it somewhere safe.'); }
+    catch (e) { prompt('Copy your backup link:', link); }
+    markBackedUp();
+  };
+  $('bkFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { if (restoreSnapshot(JSON.parse(await f.text()))) $('dlgBackup').close(); }
+    catch (err) { toast('Could not read that file'); }
+    e.target.value = '';
+  };
+  $('bkRestore').onclick = () => {
+    const d = snapshotFromLink($('bkPaste').value.trim());
+    if (!d) return toast('That link is not a backup link');
+    if (restoreSnapshot(d)) $('dlgBackup').close();
+  };
 }
 
 /* ---------- Filtering ---------- */
@@ -327,6 +434,7 @@ const CMP = {
   name:    (a, b) => a.base.localeCompare(b.base),             // base name, so variant groups line up
   status:  (a, b) => (state.owned.has(a.id) ? 1 : 0) - (state.owned.has(b.id) ? 1 : 0),   // needed (0) first
   rarity:  (a, b) => RANK[a.brar] - RANK[b.brar],              // common -> rare
+  unreleased: (a, b) => (a.unreleased ? 1 : 0) - (b.unreleased ? 1 : 0),   // released (0) first
 };
 // Walk the enabled keys in order; the first key that differs decides. Wishlist pin sits above all of them.
 function compareSprites(a, b) {
@@ -405,6 +513,7 @@ function stats() {
   const collected = [...state.owned].filter(id => BY_ID.has(id)).length;
   const maxed = [...state.mast].filter(id => BY_ID.has(id)).length;
   $('history').value = collected + ' collected · ' + maxed + ' maxed';
+  drawBackupInfo();   // keeps the "not backed up" nudge in sync as the collection changes
 }
 const esc = t => t.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1800); }
@@ -580,8 +689,18 @@ load();
 initControls();
 $('updated').textContent = 'List updated ' + SD.updated;
 // If the page was opened from someone's share link, show it in compare mode
-const incoming = location.hash.length > 1 ? parseLink(location.hash) : null;
+initBackup();
+drawBackupInfo();
+// Ask the browser not to evict our storage under pressure (best effort; ignored where unsupported)
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
+const bkSnap = location.hash.length > 1 ? snapshotFromLink(location.hash) : null;
+const incoming = !bkSnap && location.hash.length > 1 ? parseLink(location.hash) : null;
 if (incoming) openFriend(incoming); else render();
+if (recoveredFromPrev) { save(); toast('Recovered your collection from the safety copy'); }   // save() also repairs the main copy
+if (bkSnap) {                      // opened from a backup link: offer to restore, then drop the hash
+  history.replaceState(null, '', location.pathname + location.search);
+  setTimeout(() => restoreSnapshot(bkSnap), 50);
+}
 </script>
 </body>
 </html>
