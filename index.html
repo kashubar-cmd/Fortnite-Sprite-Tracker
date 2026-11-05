@@ -159,6 +159,7 @@
       <option value="default">Sort: Default</option>
       <option value="name">Sort: Name</option>
       <option value="rarity">Sort: Rarity</option>
+      <option value="variant">Sort: Variant</option>
     </select>
   </div>
   <!-- Extra compare filters, only visible in friend view -->
@@ -197,7 +198,13 @@ const LOCAL_IMG = 'img/';
 const REMOTE_IMG = 'https://fortnite.gg/img/x/sprites/icons/';
 const SPRITES = SD.sprites.map((r, i) => ({
   id:r[0], name:r[1], rar:r[2], vr:r[3], season:r[4], file:r[5], unreleased:!!r[6], order:i }));
+// Base sprite name = display name minus the variant prefix ("Fortune Halfpeel'd" -> "Halfpeel'd").
+// Used to keep each variant group in the same A-Z order when sorting by variant.
+const VARIANT_PREFIX = /^(Cursed|Fortune|Gold|Cheat ?master|Loot Hacker|Bounty Hunter|Trick or Treat|Quack|Cube|Gummy|Galaxy|Holofoil|Gem) /i;
+SPRITES.forEach(s => { s.base = s.vr === 'base' ? s.name : s.name.replace(VARIANT_PREFIX, ''); });
 const BY_ID = new Map(SPRITES.map(s => [s.id, s]));
+// Variant group order: the key order of VARIANT (Base, Fortune, Cursed, Gold, ...)
+const VARIANT_ORDER = Object.keys(VARIANT);
 
 const LS_KEY = 'spriteTracker.v1';
 // Persistent local state: owned/wish are arrays of sprite ids (stored as Sets in memory)
@@ -268,6 +275,9 @@ function visible() {
   });
   if (ui.sort === 'name') list.sort((a,b) => a.name.localeCompare(b.name));
   else if (ui.sort === 'rarity') list.sort((a,b) => RANK[b.rar]-RANK[a.rar] || a.order-b.order);
+  // Variant: all Base, then all Fortune, then all Cursed, then the rest; A-Z by base name inside each group
+  else if (ui.sort === 'variant') list.sort((a,b) =>
+    VARIANT_ORDER.indexOf(a.vr) - VARIANT_ORDER.indexOf(b.vr) || a.base.localeCompare(b.base) || a.order-b.order);
   // Default: wishlist-needed first so priorities float to the top, then source order
   else list.sort((a,b) => (prio(b)-prio(a)) || a.order-b.order);
   return list;
