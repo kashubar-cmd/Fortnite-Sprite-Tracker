@@ -15,6 +15,7 @@
     --grey-2: #b9bbbe;
     --yellow: #fce51e;
     --gold: #ffc531;
+    --wish: #ff2d87;          /* wishlist / priority (gold is reserved for Mastered) */
     --green: #43b581;
     --red: #f04747;
     --rare: #2f8fe0; --epic: #a24be0; --legendary: #e8862b; --mythic: #f5c342; --special: #3fd1c0;
@@ -32,7 +33,7 @@
   .stats { display: flex; gap: 28px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 14px; }
   .stat b { font-size: 26px; display: block; }
   .stat small { color: var(--grey); font-size: 11px; letter-spacing: 1px; }
-  .stat.gold b { color: var(--gold); }
+  .stat.gold b { color: var(--wish); }   /* priority counter uses the wishlist color */
   .bar { height: 6px; background: rgba(0,0,0,.4); border-radius: 3px; overflow: hidden; margin-bottom: 18px; }
   .bar i { display: block; height: 100%; background: var(--yellow); width: 0; transition: width .25s; }
 
@@ -62,9 +63,13 @@
   .card:not(.owned) .art img { filter: grayscale(.85) brightness(.7); }
 
   /* Wishlisted + still needed = high priority: gold outline + glow */
-  .card.priority { outline-color: var(--gold); box-shadow: 0 0 14px rgba(255,197,49,.55); }
-  .card.priority::after { content: "PRIORITY"; position: absolute; top: 8px; left: 8px; background: var(--gold);
-          color: #111; font-size: 10px; font-weight: 800; letter-spacing: 1px; padding: 2px 6px; border-radius: 4px; }
+  .card.priority { outline-color: var(--wish); box-shadow: 0 0 14px rgba(255,45,135,.6); }
+  /* Mastered: gold border + glow, plus a crown on top of the icon box */
+  .card.mastered { outline-color: var(--gold); box-shadow: 0 0 14px rgba(255,197,49,.6); }
+  .crown { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); width: 34px; height: 26px;
+           filter: drop-shadow(0 1px 3px rgba(0,0,0,.7)); pointer-events: none; z-index: 2; }
+  .card.priority::after { content: "PRIORITY"; position: absolute; top: 8px; left: 8px; background: var(--wish);
+          color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 1px; padding: 2px 6px; border-radius: 4px; }
 
   .art { display: block; aspect-ratio: 1; position: relative; }
   .art.rare { background: radial-gradient(circle at 50% 40%, #2f8fe055, #0003); }
@@ -82,8 +87,8 @@
   label.own { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--grey-2); cursor: pointer; }
   input[type=checkbox] { accent-color: var(--yellow); width: 16px; height: 16px; }
   .star { background: none; border: none; font-size: 20px; padding: 0 2px; color: var(--grey); line-height: 1; }
-  .star.on { color: var(--gold); }
-  .tag { position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px; letter-spacing: .5px; }
+  .star.on { color: var(--wish); }
+  .tag { position: absolute; bottom: 8px; right: 8px; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px; letter-spacing: .5px; }
   .tag.give { background: var(--green); color: #111; }   /* they have it, I need it */
   .tag.trade { background: #5865f2; color: #fff; }       /* I have it, they need it */
   .vtag { font-size: 10px; color: var(--grey); letter-spacing: .5px; }
@@ -104,6 +109,20 @@
   .history { display: flex; flex-direction: column; gap: 3px; }
   .history small { color: var(--grey); font-size: 11px; letter-spacing: 1px; }
   .history input { width: 210px; font-weight: 700; color: var(--grey-2); background: rgba(0,0,0,.25); }
+  /* Sort order box: draggable rows, each with an on/off checkbox and a direction flip */
+  .sortmenu { min-width: 340px; }
+  .sortmenu .hint { color: var(--grey); font-size: 11px; padding: 2px 8px 6px; }
+  .srow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: rgba(255,255,255,.04);
+          margin: 3px 0; border: 1px solid transparent; }
+  .srow.dragging { border-color: var(--yellow); background: rgba(252,229,30,.10); opacity: .9; }
+  .srow.off .slabel { color: var(--grey); }
+  .grip { cursor: grab; color: var(--grey-2); font-size: 18px; line-height: 1; padding: 0 4px; touch-action: none; user-select: none; }
+  .srow .slabel { flex: 1; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+  .srow button { padding: 4px 8px; font-size: 12px; }
+  .srow .dir { min-width: 96px; }
+  .srow .mv { display: flex; gap: 2px; }
+  .srow .mv button { padding: 4px 6px; }
+  .pinrow { display: flex; align-items: center; gap: 8px; padding: 8px; font-size: 13px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 4px; }
   .scope { color: var(--grey); font-size: 12px; margin: -6px 0 10px; }
   .empty { color: var(--grey); padding: 40px; text-align: center; grid-column: 1/-1; }
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--yellow); color: #111;
@@ -155,12 +174,10 @@
       <summary id="ddLabel">Seasons</summary>
       <div class="ddmenu" id="ddMenu"></div>
     </details>
-    <select id="sort">
-      <option value="default">Sort: Default</option>
-      <option value="name">Sort: Name</option>
-      <option value="rarity">Sort: Rarity</option>
-      <option value="variant">Sort: Variant</option>
-    </select>
+    <details class="dd" id="ddSort">
+      <summary id="sortLabel">Sort order</summary>
+      <div class="ddmenu sortmenu" id="sortMenu"></div>
+    </details>
   </div>
   <!-- Extra compare filters, only visible in friend view -->
   <div class="controls" id="cmpControls" style="display:none">
@@ -203,6 +220,10 @@ const SPRITES = SD.sprites.map((r, i) => ({
 const VARIANT_PREFIX = /^(Cursed|Fortune|Gold|Cheat ?master|Loot Hacker|Bounty Hunter|Trick or Treat|Quack|Cube|Gummy|Galaxy|Holofoil|Gem) /i;
 SPRITES.forEach(s => { s.base = s.vr === 'base' ? s.name : s.name.replace(VARIANT_PREFIX, ''); });
 const BY_ID = new Map(SPRITES.map(s => [s.id, s]));
+// Rarity sort uses the base ("common") version's rarity: every variant is tagged "special" in the
+// source data, so a variant takes the rarity of the base sprite from the same season instead.
+const BASE_RAR = new Map(SPRITES.filter(s => s.vr === 'base').map(s => [s.season + '|' + s.name, s.rar]));
+SPRITES.forEach(s => { s.brar = BASE_RAR.get(s.season + '|' + s.base) || s.rar; });
 // Variant group order: the key order of VARIANT (Base, Fortune, Cursed, Gold, ...)
 const VARIANT_ORDER = Object.keys(VARIANT);
 
@@ -210,6 +231,22 @@ const LS_KEY = 'spriteTracker.v1';
 // Persistent local state: owned/wish are arrays of sprite ids (stored as Sets in memory)
 // mast = ids marked Mastered (kept for personal history, not included in share links)
 let state = { name:'', owned:new Set(), wish:new Set(), mast:new Set(), seasons:null, friends:{} };
+
+/* ---------- Sort order config ----------
+   keys: ordered list, top row = primary sort. on = included in the sort.
+   dir: 1 = normal, -1 = flipped (see SORT_META labels).
+   pinWish: wishlisted sprites you still need jump above everything, ignoring the sort. */
+const SORT_META = {
+  variant: { label:'Variant', dirs:['Base first', 'Base last'] },
+  name:    { label:'Name',    dirs:['A → Z', 'Z → A'] },
+  status:  { label:'Status',  dirs:['Needed first', 'Owned first'] },
+  rarity:  { label:'Rarity',  dirs:['Common first', 'Rarest first'] },
+};
+const SORT_DEFAULT = () => ({
+  keys: [ { k:'variant', on:true, dir:1 }, { k:'name', on:true, dir:1 },
+          { k:'status', on:true, dir:1 }, { k:'rarity', on:false, dir:-1 } ],
+  pinWish: true });
+let sortCfg = SORT_DEFAULT();
 let friend = null;          // currently-viewed shared collection {name, owned:Set, wish:Set} or null
 // Current season = newest season id present in the data. The counters always track this one;
 // the Seasons dropdown only controls which cards are listed (default: current season only).
@@ -223,6 +260,12 @@ function load() {
     state.owned = new Set(d.owned || []);
     state.wish = new Set(d.wish || []);
     state.mast = new Set(d.mast || []);
+    // Restore sort order; validate so a stale/corrupt saved value can't break the page
+    const sc = d.sort;
+    if (sc && Array.isArray(sc.keys) && sc.keys.length === 4 && sc.keys.every(x => SORT_META[x.k])
+        && new Set(sc.keys.map(x => x.k)).size === 4) {
+      sortCfg = { keys: sc.keys.map(x => ({ k:x.k, on:!!x.on, dir:x.dir === -1 ? -1 : 1 })), pinWish: sc.pinWish !== false };
+    }
     // Restore which seasons were enabled; ignore ids that no longer exist in the data
     const ss = (d.seasons || []).filter(x => SEASON[x]);
     if (ss.length) ui.seasons = new Set(ss.map(Number));
@@ -233,7 +276,7 @@ function save() {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({
       name: state.name, owned: [...state.owned], wish: [...state.wish], mast: [...state.mast],
-      seasons: [...ui.seasons], friends: state.friends }));
+      seasons: [...ui.seasons], sort: sortCfg, friends: state.friends }));
   } catch (e) { toast('Could not save (storage blocked)'); }
 }
 
@@ -273,18 +316,32 @@ function visible() {
     }
     return true;
   });
-  if (ui.sort === 'name') list.sort((a,b) => a.name.localeCompare(b.name));
-  else if (ui.sort === 'rarity') list.sort((a,b) => RANK[b.rar]-RANK[a.rar] || a.order-b.order);
-  // Variant: all Base, then all Fortune, then all Cursed, then the rest; A-Z by base name inside each group
-  else if (ui.sort === 'variant') list.sort((a,b) =>
-    VARIANT_ORDER.indexOf(a.vr) - VARIANT_ORDER.indexOf(b.vr) || a.base.localeCompare(b.base) || a.order-b.order);
-  // Default: wishlist-needed first so priorities float to the top, then source order
-  else list.sort((a,b) => (prio(b)-prio(a)) || a.order-b.order);
+  list.sort(compareSprites);
   return list;
 }
 const prio = s => (!s.unreleased && state.wish.has(s.id) && !state.owned.has(s.id)) ? 1 : 0;
 
+// Per-key comparators; return negative if a sorts before b in the key's normal direction
+const CMP = {
+  variant: (a, b) => VARIANT_ORDER.indexOf(a.vr) - VARIANT_ORDER.indexOf(b.vr),
+  name:    (a, b) => a.base.localeCompare(b.base),             // base name, so variant groups line up
+  status:  (a, b) => (state.owned.has(a.id) ? 1 : 0) - (state.owned.has(b.id) ? 1 : 0),   // needed (0) first
+  rarity:  (a, b) => RANK[a.brar] - RANK[b.brar],              // common -> rare
+};
+// Walk the enabled keys in order; the first key that differs decides. Wishlist pin sits above all of them.
+function compareSprites(a, b) {
+  if (sortCfg.pinWish) { const d = prio(b) - prio(a); if (d) return d; }
+  for (const { k, on, dir } of sortCfg.keys) {
+    if (!on) continue;
+    const d = CMP[k](a, b) * dir;
+    if (d) return d;
+  }
+  return a.name.localeCompare(b.name) || a.order - b.order;   // stable final tie-break
+}
+
 /* ---------- Rendering ---------- */
+// Gold crown shown on Mastered sprites (inline SVG so it needs no image file)
+const CROWN_SVG = '<svg class="crown" viewBox="0 0 34 26" aria-label="Mastered"><path d="M2 8l7 6 8-11 8 11 7-6-3 16H5z" fill="#ffc531" stroke="#a87400" stroke-width="1.5" stroke-linejoin="round"/><circle cx="2" cy="8" r="2" fill="#ffd966"/><circle cx="17" cy="3" r="2" fill="#ffd966"/><circle cx="32" cy="8" r="2" fill="#ffd966"/></svg>';
 const $ = id => document.getElementById(id);
 function render() {
   const grid = $('grid');
@@ -294,7 +351,7 @@ function render() {
   for (const s of list) {
     const own = state.owned.has(s.id), wish = state.wish.has(s.id);
     const el = document.createElement('div');
-    el.className = 'card' + (own ? ' owned' : '') + (wish && !own && !s.unreleased ? ' priority' : '') + (s.unreleased ? ' unreleased' : '');
+    el.className = 'card' + (own ? ' owned' : '') + (wish && !own && !s.unreleased ? ' priority' : '') + (own && state.mast.has(s.id) ? ' mastered' : '') + (s.unreleased ? ' unreleased' : '');
     const url = s.file ? LOCAL_IMG + s.file : '';
     let tag = '';
     if (friend) {
@@ -305,6 +362,7 @@ function render() {
     el.innerHTML =
       `<div class="art ${RARITY[s.rar]}${url ? '' : ' noimg'}">` +
         (url ? `<img loading="lazy" referrerpolicy="no-referrer" src="${url}" alt="">` : '') +
+        (own && state.mast.has(s.id) ? CROWN_SVG : '') +
         `<div class="ph">👾</div>${tag}</div>` +
       `<div class="body"><div class="name">${esc(s.name)}</div>` +
       `<div class="row"><label class="own"><input type="checkbox" class="cbOwn" ${own ? 'checked' : ''} ${s.unreleased ? 'disabled' : ''}>${s.unreleased ? 'Unreleased' : 'Owned'}</label>` +
@@ -371,10 +429,16 @@ function initControls() {
     Object.entries(VARIANT).map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
   drawSeasonMenu();
   // Close the dropdown when clicking anywhere else
-  document.addEventListener('click', e => { if (!$('ddSeasons').contains(e.target)) $('ddSeasons').open = false; });
+  document.addEventListener('click', e => {
+    // composedPath() is captured at dispatch time, so it still works after a handler re-rendered
+    // the menu (the clicked node is detached by then and contains() would wrongly report "outside")
+    const path = e.composedPath();
+    if (!path.includes($('ddSeasons'))) $('ddSeasons').open = false;
+    if (!path.includes($('ddSort'))) $('ddSort').open = false;
+  });
   $('fRarity').onchange = e => { ui.rarity = e.target.value; render(); };
   $('fVariant').onchange = e => { ui.variant = e.target.value; render(); };
-  $('sort').onchange = e => { ui.sort = e.target.value; render(); };
+  drawSortMenu();
   $('search').oninput = e => { ui.q = e.target.value.trim().toLowerCase(); render(); };
   $('myName').value = state.name;
   $('myName').oninput = e => { state.name = e.target.value; save(); };
@@ -393,6 +457,68 @@ function initControls() {
   $('bnClose').onclick = closeFriend;
   $('bnSave').onclick = () => { state.friends[friend.name] = { o: enc(friend.owned), w: enc(friend.wish) }; save(); toast('Saved ' + friend.name); };
 }
+/* Sort order dropdown: drag rows (or use the arrows) to reorder; checkbox turns a key on/off;
+   the direction button flips it. Pointer events are used instead of HTML5 drag so touch screens work. */
+function sortSummary() {
+  const on = sortCfg.keys.filter(x => x.on).map(x => x.k === 'status'
+    ? (x.dir === 1 ? 'Needed' : 'Owned') : SORT_META[x.k].label);
+  return (sortCfg.pinWish ? '📌 ' : '') + 'Sort: ' + (on.join(' › ') || 'Source order') + ' ▾';
+}
+function sortChanged() { $('sortLabel').textContent = sortSummary(); save(); render(); }
+function drawSortMenu() {
+  const menu = $('sortMenu');
+  menu.innerHTML = '';
+  // Wishlist pin switch (fixed above the draggable list)
+  const pin = document.createElement('label'); pin.className = 'pinrow';
+  pin.innerHTML = `<input type="checkbox" ${sortCfg.pinWish ? 'checked' : ''}> <span>📌 Wishlist sprites jump to the top</span>`;
+  pin.querySelector('input').onchange = e => { sortCfg.pinWish = e.target.checked; $('sortLabel').textContent = sortSummary(); save(); render(); };
+  menu.appendChild(pin);
+  const hint = document.createElement('div'); hint.className = 'hint';
+  hint.textContent = 'Top row sorts first. Ties fall through to the next checked row.';
+  menu.appendChild(hint);
+
+  const list = document.createElement('div'); list.id = 'sortList'; menu.appendChild(list);
+  sortCfg.keys.forEach((item, idx) => {
+    const meta = SORT_META[item.k];
+    const row = document.createElement('div');
+    row.className = 'srow' + (item.on ? '' : ' off'); row.dataset.k = item.k;
+    row.innerHTML = `<span class="grip" title="Drag to reorder">⠿</span>` +
+      `<label class="slabel"><input type="checkbox" ${item.on ? 'checked' : ''}> ${meta.label}</label>` +
+      `<button class="dir" title="Flip direction">${meta.dirs[item.dir === 1 ? 0 : 1]}</button>` +
+      `<span class="mv"><button class="up" title="Move up">▲</button><button class="dn" title="Move down">▼</button></span>`;
+    row.querySelector('input').onchange = e => { item.on = e.target.checked; row.classList.toggle('off', !item.on); sortChanged(); };
+    row.querySelector('.dir').onclick = e => { item.dir *= -1; e.target.textContent = meta.dirs[item.dir === 1 ? 0 : 1]; sortChanged(); };
+    row.querySelector('.up').onclick = () => { if (idx > 0) { [sortCfg.keys[idx-1], sortCfg.keys[idx]] = [sortCfg.keys[idx], sortCfg.keys[idx-1]]; drawSortMenu(); sortChanged(); } };
+    row.querySelector('.dn').onclick = () => { if (idx < sortCfg.keys.length - 1) { [sortCfg.keys[idx+1], sortCfg.keys[idx]] = [sortCfg.keys[idx], sortCfg.keys[idx+1]]; drawSortMenu(); sortChanged(); } };
+
+    // Drag by the grip. Listeners live on the document, not the grip: re-inserting the dragged row
+    // into the list releases any pointer capture, which would cut the drag off after one move.
+    const grip = row.querySelector('.grip');
+    grip.onpointerdown = down => {
+      down.preventDefault();
+      row.classList.add('dragging');
+      const move = mv => {
+        const others = [...list.children].filter(r => r !== row);
+        const next = others.find(r => mv.clientY < r.getBoundingClientRect().top + r.offsetHeight / 2);
+        list.insertBefore(row, next || null);
+      };
+      const end = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', end);
+        document.removeEventListener('pointercancel', end);
+        // Commit the DOM order back into the config
+        sortCfg.keys = [...list.children].map(r => sortCfg.keys.find(x => x.k === r.dataset.k));
+        drawSortMenu(); sortChanged();
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', end);
+      document.addEventListener('pointercancel', end);
+    };
+    list.appendChild(row);
+  });
+  $('sortLabel').textContent = sortSummary();
+}
+
 /* Seasons dropdown: one checkbox per season, newest first. Current season is on by default. */
 function drawSeasonMenu() {
   const menu = $('ddMenu');
