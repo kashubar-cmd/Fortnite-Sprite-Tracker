@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sprite Tracker</title>
+<style>
+  /* ---------- Theme (palette borrowed from the fortnite.gg dark look) ---------- */
+  :root {
+    --bg: #2f3136;
+    --bg-2: #202225;
+    --card: rgba(0,0,0,.30);
+    --text: #fff;
+    --grey: #8e9297;
+    --grey-2: #b9bbbe;
+    --yellow: #fce51e;
+    --gold: #ffc531;
+    --green: #43b581;
+    --red: #f04747;
+    --rare: #2f8fe0; --epic: #a24be0; --legendary: #e8862b; --mythic: #f5c342; --special: #3fd1c0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  header { background: var(--bg-2); padding: 12px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: .5px; }
+  header h1 span { color: var(--yellow); }
+  header .spacer { flex: 1; }
+  main { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+  /* ---------- Stats ---------- */
+  .stats { display: flex; gap: 28px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 14px; }
+  .stat b { font-size: 26px; display: block; }
+  .stat small { color: var(--grey); font-size: 11px; letter-spacing: 1px; }
+  .stat.gold b { color: var(--gold); }
+  .bar { height: 6px; background: rgba(0,0,0,.4); border-radius: 3px; overflow: hidden; margin-bottom: 18px; }
+  .bar i { display: block; height: 100%; background: var(--yellow); width: 0; transition: width .25s; }
+
+  /* ---------- Controls ---------- */
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; align-items: center; }
+  input[type=text], select, button {
+    background: rgba(0,0,0,.35); color: var(--text); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 6px; padding: 8px 12px; font: inherit; font-size: 13px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--yellow); }
+  button.primary { background: var(--yellow); color: #111; font-weight: 700; border-color: var(--yellow); }
+  .chip.active { background: var(--yellow); color: #111; font-weight: 700; }
+  .group { display: flex; gap: 4px; }
+  .label { color: var(--grey); font-size: 11px; letter-spacing: 1px; margin-right: 2px; }
+
+  /* ---------- Banner for shared / friend view ---------- */
+  .banner { background: rgba(252,229,30,.08); border: 1px solid rgba(252,229,30,.35); border-radius: 8px;
+            padding: 12px 16px; margin-bottom: 16px; display: none; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .banner.show { display: flex; }
+  .banner .grow { flex: 1; min-width: 200px; }
+
+  /* ---------- Grid + cards ---------- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+  .card { background: var(--card); border-radius: 8px; position: relative; overflow: hidden;
+          outline: 2px solid transparent; transition: outline-color .15s, box-shadow .15s; }
+  .card.owned .art img { filter: none; }
+  .card:not(.owned) .art img { filter: grayscale(.85) brightness(.7); }
+
+  /* Wishlisted + still needed = high priority: gold outline + glow */
+  .card.priority { outline-color: var(--gold); box-shadow: 0 0 14px rgba(255,197,49,.55); }
+  .card.priority::after { content: "PRIORITY"; position: absolute; top: 8px; left: 8px; background: var(--gold);
+          color: #111; font-size: 10px; font-weight: 800; letter-spacing: 1px; padding: 2px 6px; border-radius: 4px; }
+
+  .art { display: block; aspect-ratio: 1; position: relative; }
+  .art.rare { background: radial-gradient(circle at 50% 40%, #2f8fe055, #0003); }
+  .art.epic { background: radial-gradient(circle at 50% 40%, #a24be055, #0003); }
+  .art.legendary { background: radial-gradient(circle at 50% 40%, #e8862b66, #0003); }
+  .art.mythic { background: radial-gradient(circle at 50% 40%, #f5c34277, #0003); }
+  .art.special { background: radial-gradient(circle at 50% 40%, #3fd1c055, #0003); }
+  .art img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .art .ph { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-size: 48px; opacity: .5; }
+  .art.noimg .ph { display: flex; }
+
+  .body { padding: 8px 10px 10px; }
+  .name { font-size: 13px; font-weight: 700; margin-bottom: 6px; min-height: 32px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  label.own { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--grey-2); cursor: pointer; }
+  input[type=checkbox] { accent-color: var(--yellow); width: 16px; height: 16px; }
+  .star { background: none; border: none; font-size: 20px; padding: 0 2px; color: var(--grey); line-height: 1; }
+  .star.on { color: var(--gold); }
+  .tag { position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px; letter-spacing: .5px; }
+  .tag.give { background: var(--green); color: #111; }   /* they have it, I need it */
+  .tag.trade { background: #5865f2; color: #fff; }       /* I have it, they need it */
+  .vtag { font-size: 10px; color: var(--grey); letter-spacing: .5px; }
+  .card.unreleased { opacity: .45; }
+  .empty { color: var(--grey); padding: 40px; text-align: center; grid-column: 1/-1; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--yellow); color: #111;
+           padding: 10px 18px; border-radius: 8px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .toast.show { opacity: 1; }
+  dialog { background: var(--bg-2); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: 20px; width: min(520px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog input[type=text] { width: 100%; margin: 8px 0; }
+  .friend { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>👾 SPRITE <span>TRACKER</span></h1>
+  <div class="spacer"></div>
+  <small id="updated" style="color:var(--grey)"></small>
+  <input type="text" id="myName" placeholder="Your name" maxlength="24" style="width:140px">
+  <button id="btnFriends">👥 Friends</button>
+  <button id="btnShare" class="primary">🔗 Copy share link</button>
+</header>
+
+<main>
+  <!-- Banner shown when a shared link is open -->
+  <div class="banner" id="banner">
+    <div class="grow"><b id="bnName"></b>'s collection (read-only view). Compare it against yours below.</div>
+    <button id="bnSave">💾 Save friend</button>
+    <button id="bnClose">✕ Back to mine</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="stOwned">0 / 0</b><small>OWNED</small></div>
+    <div class="stat"><b id="stNeed">0</b><small>STILL NEED</small></div>
+    <div class="stat gold"><b id="stPrio">0</b><small>PRIORITY (WISHLIST)</small></div>
+  </div>
+  <div class="bar"><i id="bar"></i></div>
+
+  <div class="controls">
+    <input type="text" id="search" placeholder="Search sprites…">
+    <div class="group" id="fView"></div>
+    <select id="fRarity"></select>
+    <select id="fVariant"></select>
+    <select id="fSeason"></select>
+    <select id="sort">
+      <option value="default">Sort: Default</option>
+      <option value="name">Sort: Name</option>
+      <option value="rarity">Sort: Rarity</option>
+    </select>
+  </div>
+  <!-- Extra compare filters, only visible in friend view -->
+  <div class="controls" id="cmpControls" style="display:none">
+    <span class="label">COMPARE</span>
+    <div class="group" id="fCmp"></div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</main>
+
+<dialog id="dlgFriends">
+  <h3 style="margin-top:0">Friends</h3>
+  <p style="color:var(--grey-2);font-size:13px">Paste a friend's share link to open and compare their collection.</p>
+  <input type="text" id="friendLink" placeholder="Paste share link here">
+  <div style="display:flex;gap:8px"><button class="primary" id="friendOpen">Open &amp; compare</button><button id="friendsClose">Close</button></div>
+  <div id="friendList" style="margin-top:14px"></div>
+</dialog>
+<div class="toast" id="toast"></div>
+
+<!-- Sprite list + image file names. Regenerated automatically by scripts/update.mjs -->
+<script src="sprites.js"></script>
+
+<script>
+/* ---------- Data model ---------- */
+const RARITY = { r:'rare', e:'epic', l:'legendary', m:'mythic', s:'special' };
+const RANK   = { r:1, e:2, l:3, m:4, s:5 };
+const VARIANT = { base:'Base', jeweled:'Fortune', cursed:'Cursed', gold:'Gold', cheatmaster:'Cheat Master',
+  hacker:'Loot Hacker', reaper:'Bounty Hunter', tricktreat:'Trick or Treat', quack:'Quack',
+  cube:'Cube', candy:'Gummy', galaxy:'Galaxy', holofoil:'Holofoil', gem:'Gem' };
+const SD = window.SPRITE_DATA;                 // loaded from sprites.js
+const SEASON = SD.seasons;
+// Image lookup order: local copy (img/ folder, mirrored by the update script),
+// then the original host, then a placeholder tile.
+const LOCAL_IMG = 'img/';
+const REMOTE_IMG = 'https://fortnite.gg/img/x/sprites/icons/';
+const SPRITES = SD.sprites.map((r, i) => ({
+  id:r[0], name:r[1], rar:r[2], vr:r[3], season:r[4], file:r[5], unreleased:!!r[6], order:i }));
+const BY_ID = new Map(SPRITES.map(s => [s.id, s]));
+
+const LS_KEY = 'spriteTracker.v1';
+// Persistent local state: owned/wish are arrays of sprite ids (stored as Sets in memory)
+let state = { name:'', owned:new Set(), wish:new Set(), friends:{} };
+let friend = null;          // currently-viewed shared collection {name, owned:Set, wish:Set} or null
+let ui = { view:'all', rarity:'', variant:'', season:'', sort:'default', cmp:'all', q:'' };
+
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    state.name = d.name || '';
+    state.owned = new Set(d.owned || []);
+    state.wish = new Set(d.wish || []);
+    state.friends = d.friends || {};
+  } catch (e) { /* corrupt or blocked storage: start fresh */ }
+}
+function save() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      name: state.name, owned: [...state.owned], wish: [...state.wish], friends: state.friends }));
+  } catch (e) { toast('Could not save (storage blocked)'); }
+}
+
+/* ---------- Share-link encoding ----------
+   Hash format:  #n=<name>&o=<base36 ids joined by .>&w=<base36 ids joined by .>
+   Everything lives in the URL, so no server is needed. */
+const enc = set => [...set].sort((a,b)=>a-b).map(n => n.toString(36)).join('.');
+const dec = str => new Set(str ? str.split('.').map(x => parseInt(x, 36)).filter(n => BY_ID.has(n)) : []);
+
+function buildLink() {
+  const base = location.href.split('#')[0];
+  const p = new URLSearchParams({ n: state.name || 'Friend', o: enc(state.owned), w: enc(state.wish) });
+  return base + '#' + p.toString();
+}
+function parseLink(link) {
+  const h = link.includes('#') ? link.split('#')[1] : link;
+  const p = new URLSearchParams(h);
+  if (!p.has('o') && !p.has('w')) return null;
+  return { name: p.get('n') || 'Friend', owned: dec(p.get('o')), wish: dec(p.get('w')) };
+}
+
+/* ---------- Filtering ---------- */
+function visible() {
+  let list = SPRITES.filter(s => {
+    if (ui.q && !s.name.toLowerCase().includes(ui.q)) return false;
+    if (ui.rarity && s.rar !== ui.rarity) return false;
+    if (ui.variant && s.vr !== ui.variant) return false;
+    if (ui.season && s.season !== +ui.season) return false;
+    const own = state.owned.has(s.id), wish = state.wish.has(s.id);
+    if (ui.view === 'owned' && !own) return false;
+    if (ui.view === 'need' && own) return false;
+    if (ui.view === 'wish' && !wish) return false;
+    if (friend) {
+      const fo = friend.owned.has(s.id);
+      if (ui.cmp === 'give' && !(fo && !own)) return false;   // they have it, I need it
+      if (ui.cmp === 'trade' && !(own && !friend.owned.has(s.id) )) return false; // I have, they lack
+    }
+    return true;
+  });
+  if (ui.sort === 'name') list.sort((a,b) => a.name.localeCompare(b.name));
+  else if (ui.sort === 'rarity') list.sort((a,b) => RANK[b.rar]-RANK[a.rar] || a.order-b.order);
+  // Default: wishlist-needed first so priorities float to the top, then source order
+  else list.sort((a,b) => (prio(b)-prio(a)) || a.order-b.order);
+  return list;
+}
+const prio = s => (!s.unreleased && state.wish.has(s.id) && !state.owned.has(s.id)) ? 1 : 0;
+
+/* ---------- Rendering ---------- */
+const $ = id => document.getElementById(id);
+function render() {
+  const grid = $('grid');
+  grid.innerHTML = '';
+  const list = visible();
+  if (!list.length) grid.innerHTML = '<div class="empty">Nothing matches these filters.</div>';
+  for (const s of list) {
+    const own = state.owned.has(s.id), wish = state.wish.has(s.id);
+    const el = document.createElement('div');
+    el.className = 'card' + (own ? ' owned' : '') + (wish && !own && !s.unreleased ? ' priority' : '') + (s.unreleased ? ' unreleased' : '');
+    const url = s.file ? LOCAL_IMG + s.file : '';
+    let tag = '';
+    if (friend) {
+      const fo = friend.owned.has(s.id);
+      if (fo && !own) tag = '<span class="tag give">THEY HAVE</span>';
+      else if (own && !fo) tag = '<span class="tag trade">THEY NEED</span>';
+    }
+    el.innerHTML =
+      `<div class="art ${RARITY[s.rar]}${url ? '' : ' noimg'}">` +
+        (url ? `<img loading="lazy" referrerpolicy="no-referrer" src="${url}" alt="">` : '') +
+        `<div class="ph">👾</div>${tag}</div>` +
+      `<div class="body"><div class="name">${esc(s.name)}</div>` +
+      `<div class="row"><label class="own"><input type="checkbox" ${own ? 'checked' : ''} ${s.unreleased ? 'disabled' : ''}>${s.unreleased ? 'Unreleased' : 'Owned'}</label>` +
+      `<button class="star ${wish ? 'on' : ''}" title="Wishlist (flags as priority while you still need it)">${wish ? '★' : '☆'}</button></div></div>`;
+    // Missing art on fortnite.gg's CDN -> show placeholder instead of a broken image
+    const img = el.querySelector('img');
+    // Fallback chain: local copy -> original host -> placeholder tile
+    if (img) img.onerror = () => {
+      if (!img.dataset.retried) { img.dataset.retried = 1; img.src = REMOTE_IMG + s.file; }
+      else el.querySelector('.art').classList.add('noimg');
+    };
+    el.querySelector('input').onchange = e => { toggle(state.owned, s.id, e.target.checked); };
+    el.querySelector('.star').onclick = () => { toggle(state.wish, s.id, !state.wish.has(s.id)); };
+    grid.appendChild(el);
+  }
+  stats();
+}
+function toggle(set, id, on) { on ? set.add(id) : set.delete(id); save(); render(); }
+
+function stats() {
+  // Totals only count released sprites (matches the reference site's counter)
+  const rel = SPRITES.filter(s => !s.unreleased);
+  const total = rel.length, o = rel.filter(s => state.owned.has(s.id)).length;
+  $('stOwned').textContent = o + ' / ' + total;
+  $('stNeed').textContent = total - o;
+  $('stPrio').textContent = rel.filter(prio).length;
+  $('bar').style.width = (total ? o / total * 100 : 0) + '%';
+}
+const esc = t => t.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1800); }
+
+/* ---------- Controls wiring ---------- */
+function chips(host, items, key) {
+  host.innerHTML = '';
+  items.forEach(([val, label]) => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (ui[key] === val ? ' active' : '');
+    b.textContent = label;
+    b.onclick = () => { ui[key] = val; chips(host, items, key); render(); };
+    host.appendChild(b);
+  });
+}
+function initControls() {
+  chips($('fView'), [['all','All'],['owned','Owned'],['need','Need'],['wish','Wishlist']], 'view');
+  chips($('fCmp'), [['all','Everything'],['give','They have, I need'],['trade','I have, they need']], 'cmp');
+  $('fRarity').innerHTML = '<option value="">All rarities</option>' +
+    Object.entries(RARITY).map(([k,v]) => `<option value="${k}">${v[0].toUpperCase()+v.slice(1)}</option>`).join('');
+  $('fVariant').innerHTML = '<option value="">All variants</option>' +
+    Object.entries(VARIANT).map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
+  $('fSeason').innerHTML = '<option value="">All seasons</option>' +
+    Object.entries(SEASON).map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
+  $('fSeason').onchange = e => { ui.season = e.target.value; render(); };
+  $('fRarity').onchange = e => { ui.rarity = e.target.value; render(); };
+  $('fVariant').onchange = e => { ui.variant = e.target.value; render(); };
+  $('sort').onchange = e => { ui.sort = e.target.value; render(); };
+  $('search').oninput = e => { ui.q = e.target.value.trim().toLowerCase(); render(); };
+  $('myName').value = state.name;
+  $('myName').oninput = e => { state.name = e.target.value; save(); };
+  $('btnShare').onclick = async () => {
+    const link = buildLink();
+    try { await navigator.clipboard.writeText(link); toast('Share link copied!'); }
+    catch (e) { prompt('Copy your share link:', link); }   // clipboard blocked (e.g. file://)
+  };
+  $('btnFriends').onclick = () => { drawFriends(); $('dlgFriends').showModal(); };
+  $('friendsClose').onclick = () => $('dlgFriends').close();
+  $('friendOpen').onclick = () => {
+    const f = parseLink($('friendLink').value.trim());
+    if (!f) return toast('That link has no collection data');
+    $('dlgFriends').close(); openFriend(f);
+  };
+  $('bnClose').onclick = closeFriend;
+  $('bnSave').onclick = () => { state.friends[friend.name] = { o: enc(friend.owned), w: enc(friend.wish) }; save(); toast('Saved ' + friend.name); };
+}
+function drawFriends() {
+  const host = $('friendList'); host.innerHTML = '';
+  const names = Object.keys(state.friends);
+  if (!names.length) { host.innerHTML = '<div style="color:var(--grey)">No saved friends yet.</div>'; return; }
+  names.forEach(n => {
+    const row = document.createElement('div'); row.className = 'friend';
+    row.innerHTML = `<span>${esc(n)}</span><span><button data-a="o">Compare</button> <button data-a="d">Remove</button></span>`;
+    row.querySelector('[data-a=o]').onclick = () => { const f = state.friends[n]; $('dlgFriends').close(); openFriend({ name:n, owned:dec(f.o), wish:dec(f.w) }); };
+    row.querySelector('[data-a=d]').onclick = () => { delete state.friends[n]; save(); drawFriends(); };
+    host.appendChild(row);
+  });
+}
+function openFriend(f) {
+  friend = f; ui.cmp = 'all';
+  $('bnName').textContent = f.name;
+  $('banner').classList.add('show');
+  $('cmpControls').style.display = 'flex';
+  chips($('fCmp'), [['all','Everything'],['give','They have, I need'],['trade','I have, they need']], 'cmp');
+  render();
+}
+function closeFriend() {
+  friend = null; ui.cmp = 'all';
+  $('banner').classList.remove('show');
+  $('cmpControls').style.display = 'none';
+  history.replaceState(null, '', location.pathname + location.search);  // drop the shared hash
+  render();
+}
+
+/* ---------- Boot ---------- */
+load();
+initControls();
+$('updated').textContent = 'List updated ' + SD.updated;
+// If the page was opened from someone's share link, show it in compare mode
+const incoming = location.hash.length > 1 ? parseLink(location.hash) : null;
+if (incoming) openFriend(incoming); else render();
+</script>
+</body>
+</html>
