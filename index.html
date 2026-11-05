@@ -88,6 +88,23 @@
   .tag.trade { background: #5865f2; color: #fff; }       /* I have it, they need it */
   .vtag { font-size: 10px; color: var(--grey); letter-spacing: .5px; }
   .card.unreleased { opacity: .45; }
+  /* Season dropdown (checkbox menu) */
+  .dd { position: relative; }
+  .dd summary { list-style: none; cursor: pointer; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.08);
+                border-radius: 6px; padding: 8px 12px; font-size: 13px; user-select: none; }
+  .dd summary::-webkit-details-marker { display: none; }
+  .dd[open] summary, .dd summary:hover { border-color: var(--yellow); }
+  .ddmenu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 220px; background: var(--bg-2);
+            border: 1px solid rgba(255,255,255,.15); border-radius: 8px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  .ddmenu label { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+  .ddmenu label:hover { background: rgba(255,255,255,.06); }
+  .ddmenu small { color: var(--grey); margin-left: auto; }
+  .ddmenu hr { border: 0; border-top: 1px solid rgba(255,255,255,.08); margin: 4px 0; }
+  /* Lifetime history box, deliberately separate from the current-season counters */
+  .history { display: flex; flex-direction: column; gap: 3px; }
+  .history small { color: var(--grey); font-size: 11px; letter-spacing: 1px; }
+  .history input { width: 210px; font-weight: 700; color: var(--grey-2); background: rgba(0,0,0,.25); }
+  .scope { color: var(--grey); font-size: 12px; margin: -6px 0 10px; }
   .empty { color: var(--grey); padding: 40px; text-align: center; grid-column: 1/-1; }
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--yellow); color: #111;
            padding: 10px 18px; border-radius: 8px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity .2s; }
@@ -121,15 +138,23 @@
     <div class="stat"><b id="stOwned">0 / 0</b><small>OWNED</small></div>
     <div class="stat"><b id="stNeed">0</b><small>STILL NEED</small></div>
     <div class="stat gold"><b id="stPrio">0</b><small>PRIORITY (WISHLIST)</small></div>
+    <div class="history">
+      <small>HISTORY · ALL SEASONS</small>
+      <input type="text" id="history" readonly value="">
+    </div>
   </div>
   <div class="bar"><i id="bar"></i></div>
+  <div class="scope" id="scopeNote"></div>
 
   <div class="controls">
     <input type="text" id="search" placeholder="Search sprites…">
     <div class="group" id="fView"></div>
     <select id="fRarity"></select>
     <select id="fVariant"></select>
-    <select id="fSeason"></select>
+    <details class="dd" id="ddSeasons">
+      <summary id="ddLabel">Seasons</summary>
+      <div class="ddmenu" id="ddMenu"></div>
+    </details>
     <select id="sort">
       <option value="default">Sort: Default</option>
       <option value="name">Sort: Name</option>
@@ -176,9 +201,13 @@ const BY_ID = new Map(SPRITES.map(s => [s.id, s]));
 
 const LS_KEY = 'spriteTracker.v1';
 // Persistent local state: owned/wish are arrays of sprite ids (stored as Sets in memory)
-let state = { name:'', owned:new Set(), wish:new Set(), friends:{} };
+// mast = ids marked Mastered (kept for personal history, not included in share links)
+let state = { name:'', owned:new Set(), wish:new Set(), mast:new Set(), seasons:null, friends:{} };
 let friend = null;          // currently-viewed shared collection {name, owned:Set, wish:Set} or null
-let ui = { view:'all', rarity:'', variant:'', season:'', sort:'default', cmp:'all', q:'' };
+// Current season = newest season id present in the data. The counters always track this one;
+// the Seasons dropdown only controls which cards are listed (default: current season only).
+const CURRENT = Math.max(...SPRITES.map(s => s.season));
+let ui = { view:'all', rarity:'', variant:'', seasons:new Set([CURRENT]), sort:'default', cmp:'all', q:'' };
 
 function load() {
   try {
@@ -186,13 +215,18 @@ function load() {
     state.name = d.name || '';
     state.owned = new Set(d.owned || []);
     state.wish = new Set(d.wish || []);
+    state.mast = new Set(d.mast || []);
+    // Restore which seasons were enabled; ignore ids that no longer exist in the data
+    const ss = (d.seasons || []).filter(x => SEASON[x]);
+    if (ss.length) ui.seasons = new Set(ss.map(Number));
     state.friends = d.friends || {};
   } catch (e) { /* corrupt or blocked storage: start fresh */ }
 }
 function save() {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({
-      name: state.name, owned: [...state.owned], wish: [...state.wish], friends: state.friends }));
+      name: state.name, owned: [...state.owned], wish: [...state.wish], mast: [...state.mast],
+      seasons: [...ui.seasons], friends: state.friends }));
   } catch (e) { toast('Could not save (storage blocked)'); }
 }
 
@@ -220,7 +254,7 @@ function visible() {
     if (ui.q && !s.name.toLowerCase().includes(ui.q)) return false;
     if (ui.rarity && s.rar !== ui.rarity) return false;
     if (ui.variant && s.vr !== ui.variant) return false;
-    if (ui.season && s.season !== +ui.season) return false;
+    if (!ui.seasons.has(s.season)) return false;          // hidden until enabled in the Seasons dropdown
     const own = state.owned.has(s.id), wish = state.wish.has(s.id);
     if (ui.view === 'owned' && !own) return false;
     if (ui.view === 'need' && own) return false;
@@ -263,8 +297,10 @@ function render() {
         (url ? `<img loading="lazy" referrerpolicy="no-referrer" src="${url}" alt="">` : '') +
         `<div class="ph">👾</div>${tag}</div>` +
       `<div class="body"><div class="name">${esc(s.name)}</div>` +
-      `<div class="row"><label class="own"><input type="checkbox" ${own ? 'checked' : ''} ${s.unreleased ? 'disabled' : ''}>${s.unreleased ? 'Unreleased' : 'Owned'}</label>` +
-      `<button class="star ${wish ? 'on' : ''}" title="Wishlist (flags as priority while you still need it)">${wish ? '★' : '☆'}</button></div></div>`;
+      `<div class="row"><label class="own"><input type="checkbox" class="cbOwn" ${own ? 'checked' : ''} ${s.unreleased ? 'disabled' : ''}>${s.unreleased ? 'Unreleased' : 'Owned'}</label>` +
+      `<button class="star ${wish ? 'on' : ''}" title="Wishlist (flags as priority while you still need it)">${wish ? '★' : '☆'}</button></div>` +
+      (s.unreleased ? '' : `<div class="row" style="margin-top:4px"><label class="own"><input type="checkbox" class="cbMast" ${state.mast.has(s.id) ? 'checked' : ''}>Mastered</label></div>`) +
+      `</div>`;
     // Missing art on fortnite.gg's CDN -> show placeholder instead of a broken image
     const img = el.querySelector('img');
     // Fallback chain: local copy -> original host -> placeholder tile
@@ -272,7 +308,15 @@ function render() {
       if (!img.dataset.retried) { img.dataset.retried = 1; img.src = REMOTE_IMG + s.file; }
       else el.querySelector('.art').classList.add('noimg');
     };
-    el.querySelector('input').onchange = e => { toggle(state.owned, s.id, e.target.checked); };
+    el.querySelector('.cbOwn').onchange = e => {
+      if (!e.target.checked) state.mast.delete(s.id);       // can't be mastered if not owned
+      toggle(state.owned, s.id, e.target.checked);
+    };
+    const mb = el.querySelector('.cbMast');
+    if (mb) mb.onchange = e => {
+      if (e.target.checked) state.owned.add(s.id);          // mastering implies owning
+      toggle(state.mast, s.id, e.target.checked);
+    };
     el.querySelector('.star').onclick = () => { toggle(state.wish, s.id, !state.wish.has(s.id)); };
     grid.appendChild(el);
   }
@@ -281,13 +325,18 @@ function render() {
 function toggle(set, id, on) { on ? set.add(id) : set.delete(id); save(); render(); }
 
 function stats() {
-  // Totals only count released sprites (matches the reference site's counter)
-  const rel = SPRITES.filter(s => !s.unreleased);
+  // Counters cover the current season only (released sprites), regardless of the Seasons dropdown
+  const rel = SPRITES.filter(s => !s.unreleased && s.season === CURRENT);
   const total = rel.length, o = rel.filter(s => state.owned.has(s.id)).length;
   $('stOwned').textContent = o + ' / ' + total;
   $('stNeed').textContent = total - o;
   $('stPrio').textContent = rel.filter(prio).length;
   $('bar').style.width = (total ? o / total * 100 : 0) + '%';
+  $('scopeNote').textContent = 'Counters show the current season only (' + (SEASON[CURRENT] || CURRENT) + ').';
+  // Lifetime history across every season, for bragging rights only
+  const collected = [...state.owned].filter(id => BY_ID.has(id)).length;
+  const maxed = [...state.mast].filter(id => BY_ID.has(id)).length;
+  $('history').value = collected + ' collected · ' + maxed + ' maxed';
 }
 const esc = t => t.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1800); }
@@ -310,9 +359,9 @@ function initControls() {
     Object.entries(RARITY).map(([k,v]) => `<option value="${k}">${v[0].toUpperCase()+v.slice(1)}</option>`).join('');
   $('fVariant').innerHTML = '<option value="">All variants</option>' +
     Object.entries(VARIANT).map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
-  $('fSeason').innerHTML = '<option value="">All seasons</option>' +
-    Object.entries(SEASON).map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
-  $('fSeason').onchange = e => { ui.season = e.target.value; render(); };
+  drawSeasonMenu();
+  // Close the dropdown when clicking anywhere else
+  document.addEventListener('click', e => { if (!$('ddSeasons').contains(e.target)) $('ddSeasons').open = false; });
   $('fRarity').onchange = e => { ui.rarity = e.target.value; render(); };
   $('fVariant').onchange = e => { ui.variant = e.target.value; render(); };
   $('sort').onchange = e => { ui.sort = e.target.value; render(); };
@@ -334,6 +383,34 @@ function initControls() {
   $('bnClose').onclick = closeFriend;
   $('bnSave').onclick = () => { state.friends[friend.name] = { o: enc(friend.owned), w: enc(friend.wish) }; save(); toast('Saved ' + friend.name); };
 }
+/* Seasons dropdown: one checkbox per season, newest first. Current season is on by default. */
+function drawSeasonMenu() {
+  const menu = $('ddMenu');
+  menu.innerHTML = '';
+  const ids = Object.keys(SEASON).map(Number).sort((a, b) => b - a);
+  ids.forEach(id => {
+    const lab = document.createElement('label');
+    lab.innerHTML = `<input type="checkbox" ${ui.seasons.has(id) ? 'checked' : ''}> ${esc(SEASON[id])}` +
+                    (id === CURRENT ? '<small>current</small>' : '<small>old</small>');
+    lab.querySelector('input').onchange = e => {
+      e.target.checked ? ui.seasons.add(id) : ui.seasons.delete(id);
+      if (!ui.seasons.size) { ui.seasons.add(CURRENT); drawSeasonMenu(); }   // never leave the list empty
+      seasonLabel(); save(); render();
+    };
+    menu.appendChild(lab);
+  });
+  const hr = document.createElement('hr'); menu.appendChild(hr);
+  const reset = document.createElement('label');
+  reset.innerHTML = '<span style="color:var(--yellow)">Current season only</span>';
+  reset.onclick = () => { ui.seasons = new Set([CURRENT]); drawSeasonMenu(); save(); render(); };
+  menu.appendChild(reset);
+  seasonLabel();
+}
+function seasonLabel() {
+  const old = [...ui.seasons].filter(id => id !== CURRENT).length;
+  $('ddLabel').textContent = 'Seasons: ' + (SEASON[CURRENT] || 'current') + (old ? ' + ' + old + ' old' : '') + ' ▾';
+}
+
 function drawFriends() {
   const host = $('friendList'); host.innerHTML = '';
   const names = Object.keys(state.friends);
